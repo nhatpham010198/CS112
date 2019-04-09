@@ -1,0 +1,143 @@
+#####Question  2#####
+#import and adjust dataset
+foo <- read.csv("https://tinyurl.com/y2zt2hyc")
+foo <- foo[, c(6:8, 11:16, 99, 50, 114, 49, 63, 136, 109, 126, 48, 160, 142, 10)]
+foo <- foo[c(-19, -47), ]
+which(is.na(foo) == TRUE)
+
+
+#run the orginal logistic model
+glm1=glm(pbs2s3~wartype+logcost+wardur+factnum
+         +factnum2+trnsfcap+develop+exp+decade
+         +treaty+untype4,data=foo,family=binomial)
+  
+#new logistic model with interaction
+glm2=glm(pbs2s3~wartype+logcost+wardur+factnum
+         +factnum2+trnsfcap+develop+exp+decade
+         +treaty+untype4+I(logcost*untype4)
+         ,data=foo,family=binomial) #replace logcost with wardur every thing is correct, but constant)
+
+#create new data set for marginal effect of war dur 
+newfoo_tmt=data.frame(wartype=mean(foo$wartype),logcost=mean(foo$logcost),wardur=1:315,factnum=mean(foo$factnum)
+                ,factnum2=mean(foo$factnum2),trnsfcap=mean(foo$trnsfcap),develop=mean(foo$develop)
+                ,exp=mean(foo$exp),decade=mean(foo$decade),treaty=mean(foo$treaty),untype4=1)
+
+newfoo_ctr=data.frame(wartype=mean(foo$wartype),logcost=mean(foo$logcost),wardur=1:315,factnum=mean(foo$factnum)
+                ,factnum2=mean(foo$factnum2),trnsfcap=mean(foo$trnsfcap),develop=mean(foo$develop)
+                ,exp=mean(foo$exp),decade=mean(foo$decade),treaty=mean(foo$treaty),untype4=0)
+#calculate marginal effects
+tmt1=predict(glm1,newdata=newfoo_tmt,type='response')-predict(glm1,newdata=newfoo_ctr,type='response')
+tmt2=predict(glm2,newdata=newfoo_tmt,type='response')-predict(glm2,newdata=newfoo_ctr,type='response')
+
+#plot graphs
+plot(c(1:315),tmt1,cex=0.3,type='l',col=c('black'),ylim=c(0:1)
+     ,xlab='war duration',ylab='Marginal effect')
+points(c(1:315),tmt2,cex=0.3,type='p',col=c('red'),ylim=c(0:1))
+legend('topright', c("new model", "original model"), col=c(rgb(1,0,0,0.5),'black'),lwd=1)
+
+
+
+####Question 4####
+###Import and adust data
+foo4 <- read.csv("https://tinyurl.com/y2zt2hyc")
+foo4 <- foo4[c(-19, -47), ]
+foo4=foo4[-which(is.na(foo4$pbs5l) == TRUE),]
+
+foo4$pbs2l=as.numeric(foo4$pbs2l)-1
+foo4$pbs5l=as.numeric(foo4$pbs5l)-1
+
+Tr <- rep(0, length(foo4$uncint))
+Tr[which(as.character(foo4$uncint) != 'None')] <- 1
+attach(foo4)
+
+foo4_counter=foo4
+foo4_counter$Tr=1-Tr
+
+###logistic model for 2-year peace
+glm1=glm(pbs2l~wartype+logcost+wardur+factnum
+         +factnum2+trnsfcap+develop+exp+decade
+         +treaty+Tr,family=binomial,data=foo4)
+summary(glm1)
+
+tmt_logit=predict(glm1,newdata=foo4_counter,type='response')-predict(glm1,newdata=foo4,type='response')
+summary(abs(tmt_logit))
+summary(MatchBalance(Tr~wartype+logcost+wardur+factnum
+                     + factnum2+trnsfcap+develop+exp+decade
+                     + treaty , data=foo4 
+                     ,nboots = 500))
+
+#logistic model for 5-year peace
+glm2=glm(pbs5l~wartype+logcost+wardur+factnum
+         +factnum2+trnsfcap+develop+exp+decade
+         +treaty+Tr,family=binomial,data=foo4)
+summary(glm2)
+
+tmt_logit_5=(predict(glm2,newdata=foo4_counter,type='response')
+             -glm2$fitted.values)
+summary(abs(tmt_logit_5))
+
+###Propesity score matching
+Y1=foo4$pbs2l
+Y2=foo4$pbs5l
+
+X=cbind(foo4$wartype,foo4$logcost,foo4$wardur,foo4$factnum
+        ,foo4$factnum2,foo4$trnsfcap,foo4$develop,foo4$exp,foo4$decade
+        ,foo4$treaty)
+
+###propensity 2 years
+glm3=glm(Tr ~ wartype + logcost + wardur + factnum
+         + factnum2 + trnsfcap + develop + exp + decade
+         + treaty , family=binomial , data=foo4)
+summary(glm3)
+
+rr_prop2_T=Match(Y=Y1 , Tr=Tr , X=glm3$fitted.values , BiasAdjust = TRUE)
+summary(rr_prop2_T)
+
+rr_prop2_F=Match(Y=Y1 , Tr=Tr , X=glm3$fitted)
+summary(rr_prop2_F)
+
+MatchBalance(Tr ~ wartype + logcost + wardur + factnum
+            + factnum2 + trnsfcap + develop + exp + decade
+            + treaty , match.out=rr_prop2_T , nboots=500 , data=foo4)
+
+#p##ropensity 5 years
+rr_prop5_T=Match(Y=Y2 , Tr=Tr , X=glm3$fitted, BiasAdjust = TRUE)
+summary(rr_prop5_T)
+
+rr_prop5_F=Match(Y=Y2 , Tr=Tr , X=glm3$fitted)
+summary(rr_prop5_F)
+
+MatchBalance(Tr ~ wartype + logcost + wardur + factnum
+             + factnum2 + trnsfcap + develop + exp + decade
+             + treaty, match.out=rr_prop5_T , nboots=500 , data=foo4)
+
+###Genmatch for 2 years
+genout=GenMatch(Tr=Tr,X=X, pop.size=200, BalanceMatrix=X, max.generations = 50, wait.generations = 25)
+summary(genout)
+
+###Matching with  Bias adjustment
+rr_gen2_T=Match(Y=Y1,Tr=Tr,X=X,Weight.matrix=genout,BiasAdjust = T)
+summary(rr_gen2_T)
+
+###Matching without Bias adjustment
+rr_gen2_F=Match(Y=Y1,Tr=Tr,X=X,Weight.matrix=genout)
+summary(rr_gen2_F)
+
+MatchBalance(Tr ~ foo4$wartype + foo4$logcost + foo4$wardur + foo4$factnum
+             + foo4$factnum2 + foo4$trnsfcap + foo4$develop + foo4$exp + foo4$decade
+             + foo4$treaty, match.out=rr_gen2_T , nboots=500)
+
+###Genmatch for 5 years
+
+rr_gen5_T=Match(Y=Y2,Tr=foo$Tr,X=X,Weight.matrix=genout,BiasAdjust = T)
+summary(rr_gen5_T)
+
+rr_gen5_F=Match(Y=Y2,Tr=Tr,X=X,Weight.matrix=genout)
+summary(rr_gen5_F)
+
+MatchBalance(Tr ~ foo4$wartype + foo4$logcost + foo4$wardur + foo4$factnum
+             + foo4$factnum2 + foo4$trnsfcap + foo4$develop + foo4$exp + foo4$decade
+             + foo4$treaty, match.out=rr_gen5_T , nboots=500)
+
+
+
